@@ -82,11 +82,60 @@ Answer:
 # 5. Retrieve relevant documents
 # --------------------------------
 
-def retrieve_documents(question: str, k: int = 5):
 
-    documents = vectorstore.similarity_search(
-        question,
-        k=k
+# def retrieve_documents(question: str, k: int = 5):
+    
+#     documents = vectorstore.similarity_search(
+#         question,
+#         k=k
+#     )
+
+#     return documents
+
+
+# def retrieve_documents(question: str, k: int = 5):
+
+#     retriever = vectorstore.as_retriever(
+#         search_type="similarity",
+#         search_kwargs={
+#             "k": k
+#         }
+#     )
+
+#     documents = retriever.invoke(question)
+
+#     return documents
+
+
+# retriever = vectorstore.as_retriever(
+#     search_type="similarity_score_threshold",
+#     search_kwargs={
+#         "k": k,
+#         "score_threshold": 0.3
+#     }
+# )
+
+# retriever = vectorstore.as_retriever(
+#     search_type="mmr",
+#     search_kwargs={
+#         "k": k,
+#         "fetch_k": 10,
+#         "lambda_mult": 0.5
+#     }
+# )
+
+def retrieve_documents(question: str, k: int = 5):
+    retriever = vectorstore.as_retriever(
+    search_type="mmr",
+    search_kwargs={
+        "k": k,
+        "fetch_k": 10,
+        "lambda_mult": 0.5
+    }
+)
+    
+    documents = retriever.invoke(
+        question
     )
 
     return documents

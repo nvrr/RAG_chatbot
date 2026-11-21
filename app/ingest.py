@@ -48,7 +48,11 @@ def load_documents(docs_path="documents"):
     loader = DirectoryLoader(
         path=docs_path,
         glob="*.txt",
-        loader_cls=TextLoader
+        loader_cls=TextLoader,
+        loader_kwargs={
+            "encoding": "utf-8",
+            "autodetect_encoding": True
+        }
     )
     
     documents = loader.load()
