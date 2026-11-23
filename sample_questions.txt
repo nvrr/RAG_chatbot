@@ -1,0 +1,43 @@
+
+
+
+Conversation 1: Founders
+Main question
+Who founded Google?
+Follow-ups
+1. When did they start working on it?
+2. Where did they meet?
+3. What was the original name of their search engine?
+4. Why did they change its name to Google?
+5. How did their original search engine work?
+   
+   Conversation 2: Google's business
+Main question
+How does Google make money?
+Follow-ups
+1. What percentage of its revenue comes from advertising?
+2. What are Google Ads and AdSense?
+3. How does Google target advertisements?
+4. How does Google Analytics help businesses?
+5. What are the criticisms of Google's advertising business?
+   
+   Conversation 3: Google and AI
+Main question
+What are Google's contributions to artificial intelligence?
+Follow-ups
+1. What is Gemini?
+2. What was Google Bard?
+3. What is Google DeepMind?
+4. What are Imagen and Veo?
+5. What is NotebookLM?
+6. How does NotebookLM use Gemini?
+   
+   Conversation 4: Controversies
+Main question
+What are the major criticisms of Google?
+Follow-ups
+1. Why has Google faced antitrust lawsuits?
+2. What are the privacy concerns?
+3. What is Google's alleged search monopoly?
+4. How have governments responded?
+5. How could these controversies affect Google's future?

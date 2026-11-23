@@ -1,7 +1,13 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from app.rag import generate_answer
+from app.rag import (
+    generate_answer,
+    LLMServiceError,
+    RetrievalError,
+    AnswerGenerationError,
+    RAGError
+)
 from fastapi.middleware.cors import CORSMiddleware
 
 
@@ -40,6 +46,31 @@ def health():
 @app.post("/chat")
 def chat(request: ChatRequest):
 
-    result = generate_answer(request.question)
+    try:
+        result = generate_answer(request.question)
 
-    return result
+        return result
+
+    except RetrievalError:
+        raise HTTPException(
+            status_code=503,
+            detail="Document retrieval service is unavailable."
+        )
+
+    except LLMServiceError:
+        raise HTTPException(
+            status_code=503,
+            detail="AI service is temporarily unavailable."
+        )
+
+    except AnswerGenerationError:
+        raise HTTPException(
+            status_code=503,
+            detail="Unable to generate an answer right now."
+        )
+
+    except RAGError:
+        raise HTTPException(
+            status_code=500,
+            detail="An error occurred in the RAG pipeline."
+        )
