@@ -9,6 +9,7 @@ from app.vectorstore import vectorstore, COLLECTION_NAME
 from app.database import engine
 from app.retrievers.keyword_retriever import PostgresFullTextRetriever
 from app.question_router import QuestionRouter
+from app.rerankers.cohere_reranker import rerank_documents
 
 from typing import Literal, Optional
 from pydantic import BaseModel, Field
@@ -578,7 +579,7 @@ def generate_answer(
         rrf_constant=60,
         show_logs=True
         )
-
+    
     except Exception as exc:
         logger.exception("RRF processing failed")
 
@@ -587,7 +588,47 @@ def generate_answer(
          ) from exc
 
 
-    top_chunks = reciprocal_rank_fusion_results[:10]
+    # top_chunks = reciprocal_rank_fusion_results[:10]
+
+    # --------------------------------
+# 7. Apply Cohere Reranking
+# --------------------------------
+   
+    try:
+    # RRF returns (Document, score) tuples.
+    # Cohere expects a list of Document objects.
+        rrf_documents = [
+        document
+        for document, score in reciprocal_rank_fusion_results
+        ]
+        print(f"Reranker starting with {len(rrf_documents)} RRF documents")
+
+        reranked_docs = rerank_documents(
+        documents=rrf_documents,
+        query=search_question
+        )
+        
+    except Exception as exc:
+        logger.exception("Cohere reranking failed. Falling back to RRF results.")
+        reranked_docs = rrf_documents[:8]
+
+        raise RetrievalError(
+        "Failed to rerank retrieved documents"
+        ) from exc
+    print(f"reranker completed")
+
+    top_chunks = reranked_docs
+
+# if not top_chunks:
+
+#     answer = "I could not find relevant information."
+
+#     return {
+#         "answer": answer,
+#         "sources": []
+#     }
+
+
     if not top_chunks:
 
         answer = "I could not find relevant information."
@@ -608,7 +649,7 @@ def generate_answer(
 # ──────────────────────────────────────────────────────────────────    
     context = "\n\n".join(
         document.page_content
-        for document, score in top_chunks
+        for document in top_chunks
     )
     log("Context prepared")
 
@@ -660,13 +701,13 @@ def generate_answer(
     # 10. Return response
   # --------------------------------
     print(f"answer is: {answer} , \n sources: {[ document.metadata 
-                for document, score in top_chunks]}")
+                for document in top_chunks]}")
 
     return {
         "answer": answer,
-        "sources": [
+        "sources": [ 
             document.metadata 
-            for document, score in top_chunks
+            for document in top_chunks
         ],
         
             }
