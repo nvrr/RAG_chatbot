@@ -1,0 +1,226 @@
+1. Fix your database connection file
+Use your existing engine for both retrieval methods.
+
+One correction in your SQLAlchemy setup: autoFlash should be autoflush.
+1. Fix your database connection file
+Use your existing engine for both retrieval methods.
+
+# app/database.py
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+from app.config import DATABASE_URL
+
+engine = create_engine(
+    DATABASE_URL,
+    echo=False,
+    pool_pre_ping=True,
+    pool_recycle=1800,
+)
+
+SessionLocal = sessionmaker(
+    bind=engine,
+    autoflush=False,
+    autocommit=False,
+)
+
+
+
+2. Implement PostgreSQL keyword retrieval
+Create app/retrievers/keyword_retriever.py:
+
+from typing import Any
+
+from sqlalchemy import text
+from langchain_core.documents import Document
+from langchain_core.retrievers import BaseRetriever
+from langchain_core.callbacks import CallbackManagerForRetrieverRun
+from pydantic import ConfigDict
+
+from app.database import engine
+
+
+class PostgresFullTextRetriever(BaseRetriever):
+
+    engine: Any
+    collection_name: str
+    k: int = 3
+    language: str = "english"
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    def _get_relevant_documents(
+        self,
+        query: str,
+        *,
+        run_manager: CallbackManagerForRetrieverRun,
+    ) -> list[Document]:
+
+        sql = text("""
+            SELECT
+                e.id,
+                e.document,
+                e.cmetadata,
+                ts_rank_cd(
+                    to_tsvector(
+                        :language,
+                        COALESCE(e.document, '')
+                    ),
+                    websearch_to_tsquery(:language, :query)
+                ) AS score
+
+            FROM langchain_pg_embedding e
+
+            JOIN langchain_pg_collection c
+                ON c.uuid = e.collection_id
+
+            WHERE
+                c.name = :collection_name
+                AND to_tsvector(
+                    :language,
+                    COALESCE(e.document, '')
+                ) @@ websearch_to_tsquery(:language, :query)
+
+            ORDER BY score DESC
+            LIMIT :k
+        """)
+
+        with self.engine.connect() as connection:
+            results = connection.execute(
+                sql,
+                {
+                    "language": self.language,
+                    "query": query,
+                    "collection_name": self.collection_name,
+                    "k": self.k,
+                },
+            ).mappings().all()
+
+        documents = []
+
+        for row in results:
+            metadata = row["cmetadata"] or {}
+            metadata["chunk_id"] = str(row["id"])
+            metadata["keyword_score"] = float(row["score"])
+
+            documents.append(
+                Document(
+                    page_content=row["document"],
+                    metadata=metadata,
+                )
+            )
+
+        return documents
+
+=================================================================================
+=========================================================
+===============================
+3. Connect both retrievers
+Create your retrievers:
+
+
+from app.vectorstore import vectorstore, COLLECTION_NAME
+from app.database import engine
+from app.retrievers.keyword_retriever import PostgresFullTextRetriever
+
+# Semantic retrieval
+vector_retriever = vectorstore.as_retriever(
+    search_type="mmr",
+    search_kwargs={
+        "k": 3,
+        "fetch_k": 10,
+        "lambda_mult": 0.5,
+    },
+)
+
+# PostgreSQL keyword retrieval
+keyword_retriever = PostgresFullTextRetriever(
+    engine=engine,
+    collection_name=COLLECTION_NAME,
+    k=3,
+)===============
+
+
+=========================================================
+Now both use your existing PostgreSQL collection:
+Retriever	Search method
+vector_retriever	Vector similarity using pgvector
+keyword_retriever	PostgreSQL full-text search
+
+4. Add a GIN index for production
+Run this once in your Supabase SQL Editor:
+
+CREATE INDEX IF NOT EXISTS
+idx_rag_documents_fulltext
+ON langchain_pg_embedding
+USING GIN (
+    to_tsvector('english', COALESCE(document, ''))
+);
+
+This helps PostgreSQL perform keyword searches efficiently.
+
+Important: This implementation uses PostgreSQL full-text search, not BM25. 
+It is a database-backed lexical retrieval approach and avoids building a separate in-memory BM25 index.
+
+
+==================================================================
+=========================================================
+===================================================
+
+
+EnsembleRetriever performs RRF automatically. You don't need to write your own RRF function when using it for one query.
+def reciprocal_rank_fusion(chunk_lists, rrf_constant=60, show_logs=True):
+
+
+# Semantic retrieval
+vector_retriever = vectorstore.as_retriever(
+    search_type="mmr",
+    search_kwargs={
+        "k": 3,
+        "fetch_k": 5,
+        "lambda_mult": 0.5
+    }
+)
+
+# PostgreSQL keyword retrieval
+keyword_retriever = PostgresFullTextRetriever(
+    engine=engine,
+    collection_name=COLLECTION_NAME,
+    k=3,
+)
+
+hybrid_retriever = EnsembleRetriever(
+    retrievers=[vector_retriever, keyword_retriever],
+    weights=[0.7, 0.3]  # Equal weight to vector and keyword search
+)
+
+print("Setup complete!\n")
+ 
+def retrieve_documents(question: str):
+    try:
+        # documents = vector_retriever.invoke(question)
+        documents = hybrid_retriever.invoke(question)
+
+        logger.info(
+            "Retrieved %d documents for query",
+            len(documents)
+        )
+
+        return documents
+
+    except Exception as exc:
+
+        logger.exception(
+            "Document retrieval failed"
+        )
+
+        raise RetrievalError(
+            "Failed to retrieve documents"
+        ) from exc
+
+
+
+
+
+

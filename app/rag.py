@@ -3,9 +3,14 @@ import logging
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_ollama import ChatOllama
+from langchain_community.retrievers import BM25Retriever
+from langchain_classic.retrievers import EnsembleRetriever
+
 
 from app.config import LLM_MODEL, OLLAMA_BASE_URL
-from app.vectorstore import vectorstore
+from app.vectorstore import vectorstore, COLLECTION_NAME
+from app.database import engine
+from app.retrievers.keyword_retriever import PostgresFullTextRetriever
 
 from pydantic import BaseModel, Field
 from typing import List
@@ -154,8 +159,8 @@ Answer:
 #     }
 # )
 
-
-retriever = vectorstore.as_retriever(
+# Semantic retrieval
+vector_retriever = vectorstore.as_retriever(
     search_type="mmr",
     search_kwargs={
         "k": 3,
@@ -163,10 +168,25 @@ retriever = vectorstore.as_retriever(
         "lambda_mult": 0.5
     }
 )
+
+# PostgreSQL keyword retrieval
+keyword_retriever = PostgresFullTextRetriever(
+    engine=engine,
+    collection_name=COLLECTION_NAME,
+    k=3,
+)
+
+hybrid_retriever = EnsembleRetriever(
+    retrievers=[vector_retriever, keyword_retriever],
+    weights=[0.7, 0.3]  # Equal weight to vector and keyword search
+)
+
+print("Setup complete!\n")
  
 def retrieve_documents(question: str):
     try:
-        documents = retriever.invoke(question)
+        # documents = vector_retriever.invoke(question)
+        documents = hybrid_retriever.invoke(question)
 
         logger.info(
             "Retrieved %d documents for query",
@@ -307,8 +327,10 @@ def reciprocal_rank_fusion(chunk_lists, rrf_constant=60, show_logs=True):
         
         # Go through each chunk in this query's results
         for position, chunk in enumerate(chunks, 1):  # position is 1-indexed
+            print(f"chunk DATA INSIDE METADATA {chunk} : {chunk.metadata} results:")
             # Use chunk content as unique identifier
             chunk_content = chunk.page_content
+            # chunk_id = chunk.metadata["chunk_id"]
             
             # Assign a simple ID if we haven't seen this chunk before
             if chunk_content not in chunk_id_map:
