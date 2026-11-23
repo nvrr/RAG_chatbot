@@ -558,14 +558,6 @@ def generate_answer(
     print("CHAT HISTORY:")
     print(recent_history)
 
-     # print(question)
-
-    # rewritten_question = (
-    #    rewrite_prompt | llm
-    #     ).invoke({
-    # "chat_history": recent_history,
-    # "question": question
-    #           })
 
    
 
@@ -681,7 +673,7 @@ def generate_answer(
     )
     log("Context prepared")
 
-    print(f"documents sending to llm are: {top_chunks}")
+    print(f"documents sending to llm are: {len(top_chunks)}")
 # ──────────────────────────────────────────────────────────────────
     # 8. Generate answer
 # ──────────────────────────────────────────────────────────────────    
