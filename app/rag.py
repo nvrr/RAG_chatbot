@@ -9,11 +9,11 @@ from app.vectorstore import vectorstore, COLLECTION_NAME
 from app.database import engine
 from app.retrievers.keyword_retriever import PostgresFullTextRetriever
 from app.rerankers.cohere_reranker import rerank_documents
+from app.retrievers.hybrid_retriever import hybrid_search
 
 from typing import Literal, Optional
 from pydantic import BaseModel, Field
 from typing import List
-from collections import defaultdict
 
 # --------------------------------
 # 1. logging and custom exceptions
@@ -85,105 +85,6 @@ If you can't find the answer in the documents, say "I don't have enough informat
 
 
 
-# --------------------------------
-#  Retrieve relevant documents
-# --------------------------------
-
-
-# def retrieve_documents(question: str, k: int = 5):
-    
-#     documents = vectorstore.similarity_search(
-#         question,
-#         k=k
-#     )
-
-#     return documents
-
-
-# def retrieve_documents(question: str, k: int = 5):
-
-#     retriever = vectorstore.as_retriever(
-#         search_type="similarity",
-#         search_kwargs={
-#             "k": k
-#         }
-#     )
-
-#     documents = retriever.invoke(question)
-
-#     return documents
-
-
-# retriever = vectorstore.as_retriever(
-#     search_type="similarity_score_threshold",
-#     search_kwargs={
-#         "k": k,
-#         "score_threshold": 0.3
-#     }
-# )
-
-# retriever = vectorstore.as_retriever(
-#     search_type="mmr",
-#     search_kwargs={
-#         "k": k,
-#         "fetch_k": 10,
-#         "lambda_mult": 0.5
-#     }
-# )
-
-# Semantic retrieval
-vector_retriever = vectorstore.as_retriever(
-    search_type="mmr",
-    search_kwargs={
-        "k": 3,
-        "fetch_k": 5,
-        "lambda_mult": 0.5
-    }
-)
-
-# PostgreSQL keyword retrieval
-keyword_retriever = PostgresFullTextRetriever(
-    engine=engine,
-    collection_name=COLLECTION_NAME,
-    k=3,
-)
-
-# hybrid_retriever = EnsembleRetriever(
-#     retrievers=[vector_retriever, keyword_retriever],
-#     weights=[0.7, 0.3]  # Equal weight to vector and keyword search
-# )
-
-print("Setup complete!\n")
- 
-def retrieve_documents(question: str):
-    try:
-         # 1. Semantic retrieval
-        vector_documents = vector_retriever.invoke(question)
-
-        # 2. Keyword retrieval
-        keyword_documents = keyword_retriever.invoke(question)
-
-        documents = [vector_documents, keyword_documents]
-
-        logger.info(
-            "Vector retrieved %d documents; keyword retrieved %d documents",
-            len(vector_documents),
-            len(keyword_documents)
-        )
-
-        return documents
-
-    except Exception as exc:
-
-        logger.exception(
-            "Document retrieval failed"
-        )
-
-        raise RetrievalError(
-            "Failed to retrieve documents"
-        ) from exc
-
-
 # ──────────────────────────────────────────────────────────────────
 # Step : Generate Multiple Query Variations
 # ──────────────────────────────────────────────────────────────────
@@ -231,128 +132,8 @@ def generate_multi_query_variations(original_query: str) -> List[str]:
         ) from exc
 
 # ──────────────────────────────────────────────────────────────────
-# Step 2: Search with Each Query Variation & Store Results
-# ──────────────────────────────────────────────────────────────────
-def search_with_query_variations(
-    query_variations: List[str]
-) -> List[List]:
-
-    all_retrieval_results = []
-    failed_queries = 0
-
-    for i, query in enumerate(query_variations, 1):
-
-        logger.info(
-            "Retrieving documents for query %d: %s",
-            i,
-            query
-        )
-
-        try:
-            docs = retrieve_documents(question=query)
-
-            all_retrieval_results.extend(docs)
-
-            logger.info(
-                "Query %d retrieved %d documents",
-                i,
-                len(docs)
-            )
-
-        except RetrievalError:
-
-            failed_queries += 1
-
-            logger.warning(
-                "Retrieval failed for query %d. Continuing.",
-                i
-            )
-
-            continue
-
-    # Every retrieval operation failed
-    if failed_queries == len(query_variations):
-        raise RetrievalError(
-            "All document retrieval attempts failed"
-        )
-
-    return all_retrieval_results
-
-# ──────────────────────────────────────────────────────────────────
-# Step 3: Apply Reciprocal Rank Fusion (RRF)
-# ──────────────────────────────────────────────────────────────────
-
-def reciprocal_rank_fusion(chunk_lists, rrf_constant=60, show_logs=True):
-
-    if show_logs:
-        print("\n" + "="*60)
-        print("APPLYING RECIPROCAL RANK FUSION")
-        print("="*60)
-        print(f"\nUsing rrf_constant (k) ={rrf_constant}")
-        print("Calculating RRF scores...\n")
-    
-    # Data structures for RRF calculation
-    rrf_scores = defaultdict(float)  # Will store: {chunk_content: rrf_score}
-    all_unique_chunks = {}  # Will store: {chunk_content: actual_chunk_object}
-    
-    # For verbose output - track chunk IDs
-    chunk_id_map = {}
-    chunk_counter = 1
-    
-    # Go through each retrieval result
-    for query_idx, chunks in enumerate(chunk_lists, 1):
-        if show_logs:
-            print(f"Processing Query {query_idx} results:")
-        
-        # Go through each chunk in this query's results
-        for position, chunk in enumerate(chunks, 1):  # position is 1-indexed
-            # print(f"chunk DATA INSIDE METADATA {chunk} : {chunk.metadata} results:")
-            # Use chunk content as unique identifier
-            chunk_content = chunk.page_content
-            # chunk_id = chunk.metadata["chunk_id"]
-            
-            # Assign a simple ID if we haven't seen this chunk before
-            if chunk_content not in chunk_id_map:
-                chunk_id_map[chunk_content] = f"Chunk_{chunk_counter}"
-                chunk_counter += 1
-            
-            chunk_id = chunk_id_map[chunk_content]
-            
-            # Store the chunk object (in case we haven't seen it before)
-            all_unique_chunks[chunk_content] = chunk
-            
-            # Calculate position score: 1/(rrf_constant + position)
-            position_score = 1 / (rrf_constant + position)
-            
-            # Add to RRF score
-            rrf_scores[chunk_content] += position_score
-            
-            if show_logs:
-                print(f"  Position {position}: {chunk_id} +{position_score:.4f} (running total: {rrf_scores[chunk_content]:.4f})")
-                print(f"    Preview: {chunk_content[:80]}...")
-        
-        if show_logs:
-            print()
-    
-    # Sort chunks by RRF score (highest first)
-    sorted_chunks = sorted(
-        [(all_unique_chunks[chunk_content], score) for chunk_content, score in rrf_scores.items()],
-        key=lambda x: x[1],  # Sort by RRF score
-        reverse=True  # Highest scores first
-    )
-    
-    if show_logs:
-        print(f"✅ RRF Complete! Processed {len(sorted_chunks)} unique chunks from {len(chunk_lists)} queries.")
-    
-    return sorted_chunks
-
-# ──────────────────────────────────────────────────────────────────
     # Step : Rewrite the user's question
 # ──────────────────────────────────────────────────────────────────    
-
-
-    
-
 def rewrite_question(question: str, recent_history:List ) -> str:
  # Convert history into readable text
     history_text = "\n".join(
@@ -461,49 +242,30 @@ def generate_answer(
     log(f"Generated {len(queries_to_search)} search queries")
 
 # ──────────────────────────────────────────────────────────────────
-    # 4. Retrieve relevant documents
+    # 4. Hybrid retrieval + global RRF
 # ──────────────────────────────────────────────────────────────────    
-    all_retried_docs_results = search_with_query_variations(queries_to_search)
+    reciprocal_rank_fusion_results =  hybrid_search(queries_to_search)
 
-# ──────────────────────────────────────────────────────────────────
-    # 5. Handle no relevant documents
-# ──────────────────────────────────────────────────────────────────    
-    if not any(all_retried_docs_results):
-    
+    if not reciprocal_rank_fusion_results:
+
         answer = "I could not find relevant information."
-    
+
         chat_history.extend([
-                {"role": "user", "content": question,"standalone_question": search_question},
-                {"role": "assistant", "content": answer}
-            ])
-            
-            # conversation_histories[conversation_id] = chat_history[-10:]
-        
-            
+            {
+            "role": "user",
+            "content": question,
+            "standalone_question": search_question
+            },
+             {
+            "role": "assistant",
+            "content": answer
+             }
+        ])
+
         return {
-                "answer": answer,
-                "sources": [],
-            #     "conversation_id": conversation_id
-            }
-      
-# ──────────────────────────────────────────────────────────────────
-# 6 Apply Reciprocal Rank Fusion (RRF)
-# ──────────────────────────────────────────────────────────────────
-    try:
-        reciprocal_rank_fusion_results = reciprocal_rank_fusion(
-        all_retried_docs_results,
-        rrf_constant=60,
-        show_logs=True
-        )
-    
-    except Exception as exc:
-        logger.exception("RRF processing failed")
-
-        raise RAGError(
-        "Failed to combine retrieval results"
-         ) from exc
-
-
+        "answer": answer,
+        "sources": []
+        }
 # --------------------------------
 #  7.Apply Cohere Reranking
 # --------------------------------
